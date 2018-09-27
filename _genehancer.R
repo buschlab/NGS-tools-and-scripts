@@ -29,14 +29,16 @@ matchGenehancers <- function( query, genehancer ) {
 	idxGH <- NULL
 	
 	for( idxQuery in query ) {
-	    print(idxQuery)                                         # print out were we are
-	    idxTmp <- which(grepl(idxQuery, tmp, ignore.case=TRUE)) # find matches in GHdb
+	    ##print(idxQuery)                                         # print out were we are
+	    idxTmp <- which(grepl(paste("=",idxQuery,";",sep=""), tmp, ignore.case=TRUE)) # find matches in GHdb
 	    idxGH <- union(idxGH, idxTmp)	                        # join indicies together
 	}
-	
+	print("Finished GH to query mapping! Proceed refinement.")
 	tmpGH <- genehancer[idxGH,c("CHROM","START","END","type","score","attributes")]
-	tmpGH <- data.frame("GHID"=NA, tmpGH)
+	tmpGH <- data.frame("GHID"=NA, tmpGH, "goi"=NA)
+
     ## extract genehancerIDs from 'attributes' col and insert into 'GHID' col
+    # OLD CODE IS OLD
     #idx_CG <- names(which(sapply(unlist(strsplit(tmpGH$attributes, ";")),
 	#    function(x)any(grepl("genehancer_id", x, ignore.case=TRUE)))))	
 	#ID <- strsplit(idx_CG, "=")
@@ -45,6 +47,18 @@ matchGenehancers <- function( query, genehancer ) {
 	tmpGH$GHID <- sapply(strsplit(names(which(sapply(unlist(strsplit(tmpGH$attributes, 
 	    ";")),function(x)any(grepl("genehancer_id", x, ignore.case=TRUE))))), "="),
 	    function(x) x[2])
+	## also fill 'goi' col with associated values for easier post-processing
+	for( idxQuery2 in query ) {
+	    #print(idxQuery2)
+	    idx_CG <- which(sapply(strsplit(tmpGH$attributes, ";connected_gene="),function(x)any(grepl(paste("^",idxQuery2,";",sep=""), x, ignore.case=TRUE))))
+        # catch empty-list error
+        if( length(idx_CG) > 0 ) {
+            names(idx_CG) <- sapply(strsplit(names(which(sapply(unlist(strsplit(tmpGH$attributes[idx_CG], ";connected_gene=")),function(x)any(grepl(paste("^",idxQuery2,";",sep=""), x, ignore.case=TRUE))))), ";score="),function(x) paste(x[1],x[2],sep=","))
+            tmpGH$goi[idx_CG] <- paste(tmpGH$goi[idx_CG], names(idx_CG), sep=";")
+        }
+	}
+	## remove 'NA;' string in front
+	tmpGH$goi <- sub("NA;","",tmpGH$goi)	
     ## return GHdb reduced to match queried genes
     return(tmpGH)
 }
