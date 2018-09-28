@@ -18,6 +18,138 @@ importGH <- function( path ) {
     return(genehancer)
 }
 
+## 'evalGH' analyses cols 'CandidateGene' and 'GHID' and returns summary for input-set
+# @param: input, annotated list (SV,CNV,INDEL,SNV)
+# @param: ghDB, genehancer-DB object 
+# @return: summary object with cols 'Gene','scores','sum|max|minscores','nscores'
+evalGH <- function( input, ghDB ) {
+    # 1. get the GHIDs
+    ghIDs <- unlist(strsplit(input$GHID[!is.na(input$GHID)], split=";"))
+    # 2. get the unique ones and sort them by occurrence 
+    uniqueOnes <- sort(table(ghIDs), decreasing=TRUE)
+    # 3. extract associated genes of interest from ghDB
+    goi <- unlist(strsplit(ghDB$goi[ghDB$GHID %in% names(uniqueOnes)], ";"))
+    # 4. create data.frame with affected genes
+    df_goi <- data.frame("Gene"=unique(sapply(goi, function(x) 
+        unlist(strsplit(x, ","))[1])), "scores"=NA, "sumscores"=NA, "maxscores"=NA, 
+        "minscores"=NA, "nscores"=NA, stringsAsFactors=FALSE)
+    # 5. fill up the cols
+    # 5.1 'scores'
+    #bla <- sapply(df_goi$Gene, function(y) which(sapply(strsplit(goi, ","), function(z) z[1]) %in% y))
+    #df_goi$scores <- sapply(bla, function(w) paste0(sapply(strsplit(goi[w], ","), function(x) x[2]), collapse=","))
+    df_goi$scores <- sapply(sapply(df_goi$Gene, function(y) which(sapply(strsplit(goi, ","), 
+        function(z) z[1]) %in% y)), function(w) paste0(sapply(strsplit(goi[w], ","), 
+        function(x) x[2]), collapse=","))
+    # 5.2 'sumscores'
+    df_goi$sumscores <- sapply(strsplit(df_goi$scores, ","), function(x) sum(as.numeric(x)))
+    df_goi$maxscores <- sapply(strsplit(df_goi$scores, ","), function(x) max(as.numeric(x)))
+    df_goi$minscores <- sapply(strsplit(df_goi$scores, ","), function(x) min(as.numeric(x)))
+    df_goi$nscores <- sapply(strsplit(df_goi$scores, ","), function(x) length(x))
+    df_goi$sdscores <- sapply(df_goi$scores, function(x) sd(as.numeric(unlist(strsplit(x, ",")))))
+    # replace NAs with zeros
+    df_goi$sdscores[df_goi$sdscores %in% NA] <- 0
+
+    return(df_goi)
+}
+
+## 'topGGH' takes an evaluation object as input and returns a bar-plot object of the top
+# genes of interest associated with GH-regions, i.e., most GH-regions
+# @param: evalObj, output of 'evalGH' function
+# @param: percent, displayed percentage of genes [0,1], defaults to 10% if left empty
+# @param: plottitle, headline for this plot, may be left empty
+# @return: p1, a ggplot2 prepped plot
+topGGH <- function( evalObj, percent, plottitle ) {
+    # calculation
+    if( missing(percent) ) {
+        percent <- 0.1
+    }
+    tmpCutoff <- quantile(abs(evalObj$nscores),(1 - percent))
+    idx <- which(evalObj$nscores > tmpCutoff)
+    df_input <- evalObj[idx,]
+    # information
+    if( missing(plottitle) ) {
+        plottitle <- ""
+    }
+    annotation <- "" # note this could be adjusted to carry additional information
+    xlabel <- paste0("Top ", 100*percent,"% genes of interest", collapse="")
+    # plotation
+    p1 <- ggplot2::ggplot(data=df_input, ggplot2::aes(x=Gene, y=nscores, fill=Gene)) + ggplot2::guides(fill=FALSE) +
+ 	    ggplot2::geom_bar(stat="identity", color="black", position=ggplot2::position_dodge(), alpha=0.5) +
+ 	    ggplot2::labs(title=plottitle, x=xlabel, y="Number of associated GH-regions") +
+ 	    ggplot2::theme(axis.text.x=ggplot2::element_text(angle = 75, hjust = 1)) +
+ 	    ggplot2::annotate(geom="text", Inf, Inf, hjust=1, vjust=1, label = annotation)
+ 	    
+    return(p1)
+}
+
+## 'topGScore' takes an evaluation object as input and returns a bar-plot object of the top
+# genes of interest based on max-score
+# @param: evalObj, output of 'evalGH' function
+# @param: percent, displayed percentage of genes [0,1]1], defaults to 10% if left empty
+# @param: plottitle, headline for this plot, may be left empty
+# @return: p1, a ggplot2 prepped plot
+topGScore <- function( evalObj, percent, plottitle ) {
+    #ToDo: 
+    # 1.) mark genes that overlap with association plot
+    # calculation
+    if( missing(percent) ) {
+        percent <- 0.1
+    }
+    tmpCutoff <- quantile(abs(evalObj$sumscores),(1 - percent))
+    idx <- which(evalObj$sumscores > tmpCutoff)
+    df_input <- evalObj[idx,]
+    # information
+    if( missing(plottitle) ) {
+        plottitle <- ""
+    }
+    annotation <- "" # note this could be adjusted to carry additional information
+    xlabel <- paste0("Top ", 100*percent,"% genes of interest", collapse="")
+    # plotation
+    p1 <- ggplot2::ggplot(data=df_input, ggplot2::aes(x=Gene, y=sumscores, fill=Gene)) + ggplot2::guides(fill=FALSE) +
+        ggplot2::geom_bar(stat="identity", color="black", position=ggplot2::position_dodge(), alpha=0.5) +
+ 	    geom_errorbar(inherit.aes=FALSE,data=df_input,  aes(x=Gene,  ymin=df_input$sumscores - df_input$sdscores, ymax=df_input$sumscores + df_input$sdscores), width=.2, position=position_dodge(.9)) +
+ 	    ggplot2::labs(title=plottitle, x=xlabel, y="Sum of GH-scores") +
+ 	    ggplot2::theme(axis.text.x=ggplot2::element_text(angle = 75, hjust = 1)) +
+ 	    ggplot2::annotate(geom="text", Inf, Inf, hjust=1, vjust=1, label = annotation)
+ 	    
+    return(p1)
+}
+
+## 'topGDA' analyses cols 'CandidateGene' return plot of directly associated Cgenes
+# @param: input, annotated list (SV,CNV,INDEL,SNV)
+# @param: percent, displayed percentage of genes [0,1]1], defaults to 10% if left empty
+# @param: plottitle, headline for this plot, may be left empty
+# @return: p1, a ggplot2 prepped plot
+topGDA <- function( input, percent, plottitle ) {
+    ## top 25% goi matched to SV/CNV/SNV/INDEL.. i.e. direct association
+    df_dagoi <- data.frame("Gene"=unique(input$CandidateGene[!is.na(input$CandidateGene)]),
+    "n"=sapply(unique(input$CandidateGene[!is.na(input$CandidateGene)]), function(x) length(which(input$CandidateGene %in% x))))
+    if( missing(percent) ) {
+        percent <- 0.1
+    }
+    tmpCutoff <- quantile(abs(df_dagoi$n),(1 - percent))
+    idx <- which(df_dagoi$n > tmpCutoff)
+    df_input <- df_dagoi[idx,]
+    # information
+    if( missing(plottitle) ) {
+        plottitle <- ""
+    }
+    annotation <- "" # note this could be adjusted to carry additional information
+    xlabel <- paste0("Top ", 100*percent,"% genes of interest", collapse="")
+    # plotation
+    p1 <- ggplot2::ggplot(data=df_input, ggplot2::aes(x=Gene, y=n, fill=Gene)) + ggplot2::guides(fill=FALSE) +
+        ggplot2::geom_bar(stat="identity", color="black", position=ggplot2::position_dodge(), alpha=0.5) +
+ 	    ggplot2::labs(title=plottitle, x=xlabel, y="Number of directly matched regions") +
+ 	    ggplot2::theme(axis.text.x=ggplot2::element_text(angle = 75, hjust = 1)) +
+ 	    ggplot2::annotate(geom="text", Inf, Inf, hjust=1, vjust=1, label = annotation)
+
+    return(p1)
+}
+
+
+
+
+
 ## 'matchGenehancers' given a list of names for gois this function finds all the regions
 ## in ghDB that are associated with those genes and outputs a reduced version of ghDB to
 ## work with in your project
