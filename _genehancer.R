@@ -82,13 +82,19 @@ topGGH <- function( evalObj, percent, plottitle ) {
     return(p1)
 }
 
-## 'topGScore' takes an evaluation object as input and returns a bar-plot object of the top
+## 'topGScore' takes an evaluation object as input and returns a violin-plot object of the top
 # genes of interest based on max-score
 # @param: evalObj, output of 'evalGH' function
 # @param: percent, displayed percentage of genes [0,1]1], defaults to 10% if left empty
 # @param: plottitle, headline for this plot, may be left empty
 # @return: p1, a ggplot2 prepped plot
 topGScore <- function( evalObj, percent, plottitle ) {
+    ## DEVEL ##
+    #percent <- 0.1
+    #evalObj <- snvEV
+    #plottitle <- "development"    
+    ## DEVEL ##
+
     #ToDo: 
     # 1.) mark genes that overlap with association plot
     # calculation
@@ -97,7 +103,23 @@ topGScore <- function( evalObj, percent, plottitle ) {
     }
     tmpCutoff <- quantile(abs(evalObj$sumscores),(1 - percent))
     idx <- which(evalObj$sumscores > tmpCutoff)
-    df_input <- evalObj[idx,]
+    df_input <- data.frame(evalObj[idx,], minimax=NA)
+    ## now prep. coloring
+    # define used colors
+    cmax <- "#E42032"
+    cmin <- "#005877"
+    cnormal <- "#000000"
+    cdist <- "#EC7404"
+    cmean <- "#00AEC7"
+    # take 10% max scores
+    tmpCutoff <- quantile(abs(df_input$sumscores),(0.9))
+    df_input$minimax <- ifelse(df_input$sumscores >= tmpCutoff, 'max. sum',
+                                   ifelse(df_input$sumscores %in% min(df_input$sumscores), 
+                                         'min. sum', 'in between'))    
+    df_input <- tidyr::separate_rows(df_input, scores, sep=",", convert=TRUE)
+    df_input <- data.frame(df_input, "logscores"=(log10(1 + muh$scores)), stringsAsFactors=FALSE)
+    df_input$Gene <- as.factor(muh$Gene)
+
     # information
     if( missing(plottitle) ) {
         plottitle <- ""
@@ -105,9 +127,12 @@ topGScore <- function( evalObj, percent, plottitle ) {
     annotation <- "" # note this could be adjusted to carry additional information
     xlabel <- paste0("Top ", 100*percent,"% genes of interest", collapse="")
     # plotation
-    p1 <- ggplot2::ggplot(data=df_input, ggplot2::aes(x=Gene, y=sumscores, fill=Gene)) + ggplot2::guides(fill=FALSE) +
-        ggplot2::geom_bar(stat="identity", color="black", position=ggplot2::position_dodge(), alpha=0.5) +
- 	    geom_errorbar(inherit.aes=FALSE,data=df_input,  aes(x=Gene,  ymin=df_input$sumscores - df_input$sdscores, ymax=df_input$sumscores + df_input$sdscores), width=.2, position=position_dodge(.9)) +
+    p1 <- ggplot2::ggplot(df_input, aes(x=Gene, y=logscores, color=minimax, fill="score distribution")) + 
+        ggplot2::geom_violin(alpha=0.5) + scale_color_manual(values=c(cnormal, cmax, cmin)) + scale_fill_manual(values="black") + theme_bw() + 
+        #stat_summary(fun.y=mean, geom="point", shape=23, size=2) + # +mean points
+        #stat_summary(fun.y=median, geom="line", size=2, color="red") + # +median points in red
+        stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean, geom = "crossbar",width = 0.5, alpha=0.5, color=cmean) + 
+        geom_jitter(shape=1, position=position_jitter(0.2), color=cdist, size=1, alpha=0.5, show.legend=TRUE) + 
  	    ggplot2::labs(title=plottitle, x=xlabel, y="Sum of GH-scores") +
  	    ggplot2::theme(axis.text.x=ggplot2::element_text(angle = 75, hjust = 1)) +
  	    ggplot2::annotate(geom="text", Inf, Inf, hjust=1, vjust=1, label = annotation)
