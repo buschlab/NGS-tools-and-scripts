@@ -1,0 +1,26 @@
+{
+    "id": "82655308",
+    "path": "~/Projects/Asma/RNASeq/scripts/PDC_pipeline.R",
+    "project_path": "scripts/PDC_pipeline.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1605774514406.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "490,13",
+        "scrollLine": "461"
+    },
+    "folds": "0|15|10|0|\n11|9|51|0|\n52|12|270|0|\n271|33|343|0|\n344|51|396|0|\n573|39|612|0|\n613|38|667|0|\n668|39|704|0|\n705|51|819|0|\n",
+    "lastKnownWriteTime": 1605778599,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1605794598736,
+    "read_only": false,
+    "read_only_alternatives": []
+}

@@ -1,0 +1,26 @@
+{
+    "id": "C72F4601",
+    "path": "~/Projects/Asma/RNASeq/scripts/Enrichment_pipeline.R",
+    "project_path": "scripts/Enrichment_pipeline.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1605528567683.0,
+    "source_on_save": false,
+    "relative_order": 6,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "9,25",
+        "scrollLine": "0"
+    },
+    "folds": "53|68|89|0|\n95|52|124|0|\n127|49|158|0|\n164|93|190|0|\n192|14|215|0|\n",
+    "lastKnownWriteTime": 1605536201,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1605536201445,
+    "read_only": false,
+    "read_only_alternatives": []
+}

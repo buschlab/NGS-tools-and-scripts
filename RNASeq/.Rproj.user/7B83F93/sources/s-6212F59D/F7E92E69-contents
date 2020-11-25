@@ -1,0 +1,77 @@
+## construct graph from distances
+# @param: sample.obj, a vdjtools formatted matrix of a single sample or a list of those
+# @param: seqField, index or name of the column that is used for distance comparison
+# @param: maxDist, maximum allowd distance/difference between sequences
+# @param: group.vector, contains group denominators for list elements to set 'gID' graph attribute (default: NULL)
+# @param: snames.vector, contains sample denominators for list elements to set 'sID' graph attribute (default: NULL)
+# @return: igraph object (or list of those) containing sequences as nodes that are connected if distance > maxDist
+getCTGraph <- function(sample.obj, seqField, maxDist=1, group.vector=NULL, snames.vector=NULL) {
+  require(stringdist); require(igraph)
+  if( class(sample.obj) == "data.frame" ) {
+    ## add 'sID' and 'gID' column to df - if it does not exist yet
+    if( !any(grepl("sID", names(sample.obj))) ) {
+      sample.obj$sID <- snames.vector
+    }
+    if( !any(grepl("gID", names(sample.obj))) ) {
+      sample.obj$gID <- group.vector
+    }
+    
+    ## calculate levenshtein distances between strings
+    dmatrix <- stringdist::stringdistmatrix(sample.obj[,eval(seqField)], 
+                                            sample.obj[,eval(seqField)], method="lv")
+    ## retain sequences
+    colnames(dmatrix) <- sample.obj[,eval(seqField)]
+    ## in case of duplicate sequences, i.e., distance == 0 we nedd a workaround
+    dmatrix[(dmatrix == 0)] <- 0.5      # set all zeros to some arbitrary value that does not occur otherwise
+    dmatrix[(dmatrix > maxDist)] <- 0   # set all values above threshold to 0
+    diag(dmatrix) <- 0                  # reset matrix diagonal to 0 to prevent self-pointing edges
+    ## set all values above maximum distance to 0
+    dmatrix[(dmatrix > maxDist)] <- 0
+    ## construct complete graph - because I might need it later
+    g.full <- igraph::graph_from_adjacency_matrix(dmatrix, mode="undirected", weighted=TRUE)
+    ## set edge weights according to number of mismatches, i.e., 1/#mismatches
+    g.full <- igraph::set.edge.attribute(g.full, "weight", index=igraph::E(g.full),
+                                         value=1/igraph::get.edge.attribute(g.full, "weight", 
+                                                                            index=igraph::E(g.full)))
+    # transfer all the vdjdata to the graph object
+    for( idx in names(sample.obj) ) {
+      g.full <- igraph::set_vertex_attr(graph=g.full, name=eval(idx), index=igraph::V(g.full), 
+                                        value=sample.obj[,eval(idx)])
+    } 
+    # include 'sID' as graph attribute
+    g.full <- igraph::set.graph.attribute(g.full, "sID", paste(
+      unique(
+        unlist(
+          strsplit(
+            igraph::get.vertex.attribute(
+              graph=g.full, name="sID", index=igraph::V(g.full)), split=",",fixed=TRUE))), collapse = ","))
+    # include 'gID' as graph attribute
+    g.full <- igraph::set.graph.attribute(g.full, "gID", paste(
+      unique(
+        unlist(
+          strsplit(
+            igraph::get.vertex.attribute(
+              graph=g.full, name="gID", index=igraph::V(g.full)), split=",",fixed=TRUE))), collapse = ","))
+    ### ToDo: set edge-weigth to 1/error-rate
+    #g.full <- igraph::set_edge_attr(graph=g.full, name="weight", )
+    return(g.full)
+    
+  } else if( class(sample.obj) == "list" ) {
+    ## check if group &| sname vectors have been supplied and if there same length as the sample.list
+    if( !is.null(group.vector) & !(length(group.vector) == length(sample.obj)) ) {
+      stop("Length of 'group.vector' and 'sample.list' is unequal!")
+    }
+    if( !is.null(snames.vector) & !(length(snames.vector) == length(sample.obj)) ) {
+      stop("Length of 'snames.vector' and 'sample.list' is unequal!")
+    }
+    nw.list <- list()
+    for( idx in c(1:length(sample.obj)) ) {
+      ## construct AA-graph for samples
+      nw.list[[names(sample.obj)[eval(idx)]]] <- getCTGraph(sample.obj[[names(sample.obj)[eval(idx)]]],
+                                                            seqField,
+                                                            maxDist=maxDist, group.vector[eval(idx)], 
+                                                            snames.vector[eval(idx)])
+    }
+    return(nw.list)
+  }
+}

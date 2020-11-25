@@ -1,0 +1,266 @@
+# SINGLE SAMPLE GENE SET ENRICHMENT ANALYSIS ------------------------------
+# load libraries and set-up databases for pathway mapping
+library(MSigDB)
+library(GSVA)
+library(limma)
+Hs.hm <- MSigDB[["HALLMARK"]]
+
+## we just keep this here for later use
+# Hs.c2 <- MSigDB[["C2_CURATED"]]
+# KEGG.DB <- Hs.c2[grep("KEGG_", names(Hs.c2))]
+# REACTOME.DB <- Hs.c2[grep("REACTOME_", names(Hs.c2))]
+# Hs.c3 <- MSigDB[["C3_MOTIF"]]
+# Hs.c5 <- MSigDB[["C5_GENE_ONTOLOGY"]]
+
+# load the results of the expression analysis
+dds <- readRDS(file="Thyroid_dds.rds", refhook = NULL)
+result <- readRDS(file="Thyroid_result.rds", refhook = NULL)
+
+# repeat previous steps to get normalized values for gene counts
+vsd <- DESeq2::rlog(dds, blind=FALSE,fitType='local')   # normalization
+mygeneexpression <- SummarizedExperiment::assay(vsd)                  # get counts
+
+# IQR based filtering
+# iqr <- apply(mygeneexpression,1,IQR)
+# plot(ecdf(iqr))
+# keep <- iqr >= quantile(iqr, 0.25)
+# mygeneexpression <- mygeneexpression[keep,]
+
+# perform actual enrichment
+ssgsea.Thyroid <- gsva(
+  as.matrix(mygeneexpression), Hs.hm, min.sz=10, max.sz=500,
+  method="ssgsea", ssgsea.norm=TRUE,
+  verbose=TRUE)
+
+# have a look at the output
+head( ssgsea.Thyroid[order(ssgsea.Thyroid[,1], decreasing=T),], 10 )
+
+# We test whether there is a difference between the GSVA enrichment scores from each 
+# pair of phenotypesusing a simple linear model and moderated t-statistics computed 
+# by thelimmapackage using an empiricalBayes shrinkage method (see Smyth, 2004).  
+# We are going to examine both, changes at gene level andchanges  at  pathway  level 
+# and  since,  as  we  shall  see  below,  there  are  plenty  of  them,  we  are  
+# going  toemploy the following stringent cut-offs to attain a high level of statistical 
+# and biological significance:
+adjPvalueCutoff <- 0.1
+logFCcutoff <- log2(2)
+design <- model.matrix(~ factor(colData(dds)$condition))
+
+colnames(design) <- c("ALL", "EARLYvsLATE")
+fit <- lmFit(ssgsea.Thyroid, design)
+fit <- eBayes(fit)
+allGeneSets <- topTable(fit, coef="EARLYvsLATE", number=Inf)
+DEgeneSets <- topTable(fit, coef="EARLYvsLATE", number=Inf,p.value=adjPvalueCutoff, adjust="BH")
+res <- decideTests(fit, p.value=adjPvalueCutoff)
+
+summary(res)
+
+# We rename our samples - if we want to.
+colnames(ssgsea.Thyroid) <- c("early_1","early_2","early_3","late_1","late_2","late_3")
+# construct our design to facilitate comparisons
+design <- model.matrix(~ 0+factor(c(rep(1,3),rep(2,3))))
+colnames(design) <- c("early","late")             
+# here we specify which comparison we want to make
+# In this case we take 'early' as reference level, because that's the direction in which
+# we calculated the differential expression. To that end we use the column names of out design
+# and say that it is 'late-stage' minus 'early-stage'
+contrast.matrix <- makeContrasts(late-early, levels=design)
+# fit the linear model 
+fit  <- lmFit(as.matrix(ssgsea.Thyroid), design)
+# and get results for our chosen contrast
+fit2 <- contrasts.fit(fit, contrast.matrix)
+# calculate Empirical Bayes Statistics for Differential Expression
+fit2 <- eBayes(fit2)
+# extract the top ranked pathways and perform multiple testing correction
+resf <- topTableF(fit2, adjust="BH",number=Inf,sort.by="F",p.value=adjPvalueCutoff)
+
+pheatmap::pheatmap(ssgsea.Thyroid[rownames(resf),],fontsize=8,cellwidth=10,cellheight=10)
+
+res_HB <- decideTests(fit2, p.value=adjPvalueCutoff)
+summary(res_HB)
+
+# ***********
+library(GSVAdata)
+data(leukemia)
+summary(leukemia_eset)
+leukemia_eset
+
+
+test <- assayData(leukemia_eset)
+test <- test$exprs
+
+plot(ecdf(iqr))
+
+
+
+iqr <- apply(test,1,IQR)
+
+plot(density(iqr))
+
+hall_sym <- lapply(hall,function(x){unlist(mget(x,org.Mm.egSYMBOL,ifnotfound=NA))})
+
+res_gsva <- gsva(as.matrix(log2(mymat[,])),hall_sym,rnaseq=F,no.bootstraps=1)
+colnames(res_gsva) <- c("WT_1","WT_2","WT_3","WT_4","KO_Healthy_1","KO_Healthy_2","KO_Healthy_3","KO_Healthy_4",
+                        "KO_Scratch_1","KO_Scratch_2","KO_Scratch_3","KO_Scratch_4")
+
+# Limma
+library(limma)
+design <- model.matrix(~ 0+factor(c(rep(1,4),rep(2,4),rep(3,3))))
+colnames(design) <- c("WT","Healthy","Scratch")
+contrast.matrix <- makeContrasts(Healthy-WT, Scratch-WT,Scratch-Healthy, levels=design)
+fit  <- lmFit(as.matrix(res_gsva[,1:11]), design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+resf <- topTableF(fit2, adjust="BH",number=nrow(res_gsva),sort.by="F")
+pheatmap(res_gsva[rownames(resf)[1:15],1:11],fontsize=8,cellwidth=10,cellheight=10)
+
+# tutorial 
+library(GSVAdata)
+data(c2BroadSets)
+
+res_gsva <- gsva(
+  as.matrix(mygeneexpression), Hs.hm, min.sz=10, max.sz=500,
+  method="ssgsea", ssgsea.norm=TRUE,
+  verbose=TRUE)
+
+colnames(res_gsva) <- c("early_1","early_2","early_3","late_1","late_2","late_3")
+design <- model.matrix(~ 0+factor(c(rep(1,3),rep(2,3))))
+colnames(design) <- c("early","late")
+
+contrast.matrix <- makeContrasts(early-late, levels=design)
+fit  <- lmFit(as.matrix(res_gsva), design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+resf <- topTableF(fit2, adjust="BH",number=nrow(res_gsva),sort.by="F")
+pheatmap::pheatmap(res_gsva[rownames(resf),],fontsize=8,cellwidth=10,cellheight=10)
+
+
+
+
+
+## depict gene sets as networks
+plot_igraph <- function(dat, source, overlap, cutString, comp ) {
+  mygroups <- source[rownames(dat)]
+  mat <- sapply(mygroups,
+                function(y)
+                  sapply(mygroups,
+                         function(x) length(as.vector(
+                           intersect(as.vector(unlist(y)),
+                                     as.vector(unlist(x)))))/min(length(as.vector(unlist(y))),
+                                                                 length(as.vector(unlist(x))))))
+  
+  # Draw an edge, if they have 20% overlap
+  b.mat <- mat > overlap
+  # Set the diagonal to zero
+  diag(b.mat) <- FALSE
+  # Create a graph
+  groups.net <- graph.adjacency(b.mat,mode="undirected",diag=F)
+  # Add Attributes to the nodes
+  # Encode Node size from the size of the gene set
+  w <- sapply( mygroups[V(groups.net)$name], length)
+  dat$weight <- w[rownames(dat)]
+  
+  # Add the log 10 p-value
+  dat$plog <- -log10(dat$p.val)
+  # Set the fontsize
+  dat$fontsize <- 8
+  
+  dat <- cbind(Term=rownames(dat), dat)
+  
+  # data(hs.inter)
+  # data(ER.deg)
+  # #subnet <- subg(g=hs.inter, dat=ER.deg$dat, refcol=1)
+  # 
+  # 
+  # Prepare the graph
+  gt3 <- subg(g=groups.net, dat=dat, refcol=1)
+  
+  gt3 <- att.setv(g=gt3,
+                  from="plog", to="nodeColor",
+                  breaks=seq(min(dat$plog),max(dat$plog),((max(dat$plog) - min(dat$plog)) / 10)),
+                  cols=c("Green","Red"),pal=2)
+  
+  gt3 <- att.setv(g=gt3, from="weight", to="nodeSize", pal=2)
+  gt3 <- att.setv(g=gt3, from="fontsize", to="nodeFontSize", pal=2)
+  gt3 <- att.setv(g=gt3, from="fontsize", to="nodeFontSize", pal=2)
+  
+  #gt3
+  
+  # rename node names
+  V(gt3)$name <- gsub(cutString, "", V(gt3)$name)
+  
+  gr <- cluster_edge_betweenness(gt3)
+  #plot(gr, gt3, col=gt3$legNodeColor$scale, layout=layout.circle)
+  
+  pdf(file= paste( "gage_", cutString, comp, ".pdf", sep=""), width=18, height=18)
+  plot(
+    gr, gt3,
+    #col=gt3$legNodeColor$scale,
+    main=paste( cutString, comp),
+    vertex.size=4 )
+  dev.off()
+}
+
+# GSVA als Network 
+
+
+
+# DoRothEA - TF activity inference ----------------------------------------
+library(dorothea)
+library(viper)
+
+# load our Expression data set
+dds <- readRDS(file="Thyroid_dds.rds", refhook = NULL)
+result <- readRDS(file="Thyroid_result.rds", refhook = NULL)
+
+# repeat previous steps to get normalized values for gene counts
+vsd <- DESeq2::vst(dds, blind=FALSE,fitType='local')   # normalization
+mygeneexpression <- SummarizedExperiment::assay(vsd)   # get counts
+
+# acessing (human) dorothea regulons
+data(dorothea_hs, package = "dorothea")
+# limit the regulons to confidence interval I=[A,B]
+regulons = dorothea_hs %>%
+  filter(confidence %in% c("A", "B"))
+
+# Run Pipeline to calculate transcription factor activities
+tf_activities <- run_viper(mygeneexpression, regulons, 
+                           options =  list(method = "scale", minsize = 4, 
+                                           eset.filter = FALSE, cores = 1, 
+                                           verbose = FALSE))
+
+# CARNIVAL ----------------------------------------------------------------
+# The aim of the CARNIVAL pipeline is to identify a subset of interactions from a 
+# prior knowledge network that represent potential regulated pathways linking known 
+# or potential targets of perturbation towards active transcription factors derived 
+# from GEX data.
+
+library(CARNIVAL)
+
+load(file = system.file("toy_inputs_ex1.RData",
+                        package="CARNIVAL"))
+load(file = system.file("toy_measurements_ex1.RData",
+                        package="CARNIVAL"))
+load(file = system.file("toy_network_ex1.RData",
+                        package="CARNIVAL"))
+
+# lpSolve
+result = runCARNIVAL(inputObj = toy_inputs_ex1, measObj = toy_measurements_ex1,
+                     netObj = toy_network_ex1)
+
+print(result)
+
+
+
+
+
+# Carnival? 
+
+# 
+# - PCA
+# - GSVA
+# - Dorothea  => Upstream TFs
+# - Carnival  => Upstream Pathways
+# - Waiting for Raw Data as BAM files and do variant calling
+# - Compare mutations with Cozmic Database
+# - Use TCGA data and compare expression of Thyroid Cancer samples
