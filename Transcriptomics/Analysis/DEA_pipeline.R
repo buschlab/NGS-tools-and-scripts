@@ -6,33 +6,28 @@ source("scripts/_RNASeq_functions.R")
 set.seed(16341)
 
 # DIFFERENTIAL EXPRESSION ANALYSIS ----------------------------------------
+# Load in the Count data into the variable cts
+# For this you must start your R session from the same directory where your 
+# File resised in, or give a path to the file or set the working directory 
+# to the directory of the file with the command setwd("Path/to/your/file")
+cts <- as.matrix(read.csv("data/RAW/ASMA_Thyroid NGS Tumours Only.txt",sep="\t",row.names="Gene",header=T))
 
-## First we get some sample data from the 'airways' package. The inconvenient procedure
-# of extracting counts and metadata just to build a new object from it - just serves to
-# show how it is done. 
-library("airway")
-data(airway)
-# extract sample information from this data set
-metadata <- data.frame(colData(airway))[1:6,]
-# reduce to 6 samples and order by treatment
-metadata <- colData(airway) %>%
-  as.data.frame() %>%
-  dplyr::slice(1:6) %>%
-  dplyr::arrange(dex)
-
-# extract counts and bring in the same order as the samples
-cnts <- assay(airway)[,rownames(metadata)]
-
+# Now we have to define which columns belong to which tumor type
+# First create a data frame with the number of columns in cts as number of rows
+# and 1 column for - guessed right - the solid and cystic cancer type
+# Take a look what rep("Early",3) does
+# Factor is special in R, denoting that this is a condition, and not just a character
+samples <- data.frame(row.names = colnames(cts), sID = colnames(cts), condition = as.factor(c(rep("Early",3),rep("ThyPap",3))))
 # Check true?
-all(rownames(metadata) == colnames(cnts))
+all(rownames(samples) == colnames(cts))
 
 # This does all the magic of initialization
 # First reads in the count data from cts
 # Gets the information on the smaples from "samples"
 # And defines an "experimental design" along the different conditions
-dds <- DESeqDataSetFromMatrix(countData = cnts,
-                              colData = metadata,
-                              design = ~ dex)
+dds <- DESeqDataSetFromMatrix(countData = cts,
+                              colData = samples,
+                              design = ~ condition)
 
 # Now have a look what you got                              
 dds
@@ -56,7 +51,7 @@ resultsNames(dds)
 
 # And extract the results, but do a shrinkage of the fold change first. will explain later
 # We extract exactly the result name
-result <- lfcShrink(dds, coef="adjust_this_to_your_coefficient", type="apeglm")
+result <- lfcShrink(dds, coef="condition_ThyPap_vs_Early", type="apeglm")
 
 # Order the result
 result <- result[order(result$pvalue),]
@@ -85,20 +80,20 @@ counts(dds, normalized=T)[which(rownames(counts(dds)) %in% c("STAR")),]
 
 
 # Finally we save our data for easy reloading
-saveRDS(dds, file="data/RDS/airways_dds.rds", compress = TRUE)
-saveRDS(result, file="data/RDS/airways_result.rds", compress = TRUE)
+saveRDS(dds, file="data/RDS/Thyroid_dds.rds", compress = TRUE)
+saveRDS(result, file="data/RDS/Thyroid_result.rds", compress = TRUE)
 
 # And export results to excel table
-openxlsx::write.xlsx(result,file = paste("data/output/airways.differential.expression.xlsx",sep=""),
+openxlsx::write.xlsx(result,file = paste("data/output/Thyroid.differential.expression.LATEvsEARLY.xlsx",sep=""),
                      rowNames=TRUE,colNames=TRUE, colWidths = c(NA, "auto", "auto"))
 
 # VOLCANO PLOT ------------------------------------------------------------
 # Now we can start visualizing our results.
 # If you start from here and don't want to repeat your analyses, you can load the results.
-result <- readRDS(file="data/RDS/airways_result.rds", refhook = NULL)
+result <- readRDS(file="data/RDS/Thyroid_result.rds", refhook = NULL)
 
 # pdf() and dev.off() will export your plot to a pdf-file in your working directory
-pdf(file=paste("data/output/volcano.airways.pdf",sep=""), width=8, height=8, onefile=T)
+pdf(file=paste("data/output/volcano.Thyroid_Late_vs_Early.pdf",sep=""), width=8, height=8, onefile=T)
 EnhancedVolcano::EnhancedVolcano(result,                   # our data
                                  lab = rownames(result),   # how to name the dots later on
                                  x = 'log2FoldChange',     # where do we find the log fold column
@@ -112,7 +107,7 @@ EnhancedVolcano::EnhancedVolcano(result,                   # our data
                                  drawConnectors = TRUE,
                                  widthConnectors = 0.2,
                                  colConnectors = 'grey30',
-                                 title = 'Papillary airways cancer vs. early cancer', # plot title
+                                 title = 'Papillary thyroid cancer vs. early cancer', # plot title
                                  subtitle = 'pvalue  < 0.001',
                                  xlab = "logFC") # how to name the x axis
 dev.off()
@@ -127,8 +122,8 @@ dev.off()
 # You can cluster rows and columns so that similar samples/gene 
 
 # Load the data 
-dds <- readRDS(file="data/RDS/airways_dds.rds", refhook = NULL)
-result <- readRDS(file="data/RDS/airways_result.rds", refhook = NULL)
+dds <- readRDS(file="data/RDS/Thyroid_dds.rds", refhook = NULL)
+result <- readRDS(file="data/RDS/Thyroid_result.rds", refhook = NULL)
 
 # Next we prepare the data we want to show in the heatmap. 
 # We must extract the expression data of the genes from the dds object
@@ -164,16 +159,16 @@ complete <- pheatmap::pheatmap(plot.df, color = viridis::inferno(length(mat_brea
                                cluster_rows = T, clustering_distance_rows = "correlation",
                                cluster_cols = F,
                                fontsize_row = 5, fontsize_col = 12,
-                               main = "Papillary airways cancer vs. early cancer - log10(normalized)")
+                               main = "Papillary thyroid cancer vs. early cancer - log10(normalized)")
 # save to pdf-file
-pdf(file=paste("data/output/HeatMap.airways.DEA.pdf",sep=""), width=6, height=12, onefile=T)
+pdf(file=paste("data/output/HeatMap.Thyroid.DEA.pdf",sep=""), width=6, height=12, onefile=T)
 print(complete)
 dev.off()
 
 # PRINCIPAL COMPONENT ANALYSIS --------------------------------------------
 # load the data
-dds <- readRDS(file="data/RDS/airways_dds.rds", refhook = NULL)
-result <- readRDS(file="data/RDS/airways_result.rds", refhook = NULL)
+dds <- readRDS(file="data/RDS/Thyroid_dds.rds", refhook = NULL)
+result <- readRDS(file="data/RDS/Thyroid_result.rds", refhook = NULL)
 
 # retrieve the metadata 
 samples <- SummarizedExperiment::colData(dds)
@@ -208,7 +203,7 @@ pca1 <-ggplot2::ggplot() +
   ggrepel::geom_text_repel(data=dataGG, ggplot2::aes(PC1, PC2,label=rownames(samples)))
 
 # save to file - with a different method this time
-ggsave(filename="data/output/PCA_airways_DEA_Late_vs_Early_sigGenes.pdf", plot=pca1, width=6, height=6)
+ggsave(filename="data/output/PCA_Thyroid_DEA_Late_vs_Early_sigGenes.pdf", plot=pca1, width=6, height=6)
 
 # the easy transformation
 rld <- vst(dds, blind=FALSE,fitType='local')
@@ -218,7 +213,7 @@ plotPCA(rld, ntop=500)
 # DOWNSTREAM PREPARATION --------------------------------------------------
 ## To facilitate more convenient downstream analyses, we will prepare the required data.
 # First we will prepare our variables so that we can progress in the investigation.
-dds <- readRDS(file="data/RDS/airways_dds.rds", refhook = NULL)
+dds <- readRDS(file="data/RDS/Thyroid_dds.rds", refhook = NULL)
 
 # For downstream analysis we normalize our count matrix.
 vsd <- DESeq2::vst(dds, blind=FALSE,fitType='local')   # normalization
@@ -235,5 +230,5 @@ nrow(cova) == ncol(Normalised_counts_matrix)
 rownames( cova ) == colnames( Normalised_counts_matrix )
 
 # And if everything is ok we can save out files
-saveRDS(Normalised_counts_matrix, file="data/RDS/airways_normalized_counts.rds", compress = TRUE)
-saveRDS(cova, file="data/RDS/airways_covariates.rds", compress = TRUE)
+saveRDS(Normalised_counts_matrix, file="data/RDS/Thyroid_normalized_counts.rds", compress = TRUE)
+saveRDS(cova, file="data/RDS/Thyroid_covariates.rds", compress = TRUE)

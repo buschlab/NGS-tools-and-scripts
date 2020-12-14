@@ -1,5 +1,4 @@
 # INITIALIZATION ----------------------------------------------------------
-
 # This is a nice color palette.
 cols <- cols <- pals::tableau20(20)
 # Take a look at it.
@@ -17,7 +16,6 @@ dir.create("data/RAW", showWarnings = FALSE)
 
 
 # REQUIRED PACKAGES -------------------------------------------------------
-
 # We will need these libraries. Check out 'install.packages.R' if you want
 # some help with the installation.
 library(tidyverse)
@@ -50,6 +48,26 @@ quantile_breaks <- function(xs, n = 10) {
   breaks[!duplicated(breaks)]
 }
 
+# 'tx2gene' retrieves transcript to gene mapping from biomart
+#'@return transcript-to-gene mapping df
+tx2gene <- function(){
+  
+  mart <- biomaRt::useMart(biomart = "ensembl", 
+                           dataset = "hsapiens_gene_ensembl")
+  
+  t2g <- biomaRt::getBM(attributes = c("ensembl_transcript_id", 
+                                       "ensembl_gene_id",
+                                       "external_gene_name"), mart = mart)
+  
+  t2g <- dplyr::rename(t2g, 
+                       target_id = ensembl_transcript_id,
+                       ens_gene = ensembl_gene_id, 
+                       ext_gene = external_gene_name)
+  #t2g <- t2g[!duplicated(t2g$target_id),]
+  #t2g <- t2g[!duplicated(t2g$ens_gene),]
+  rownames(t2g) <- t2g$target_id
+  return(t2g)
+}
 
 # CARNIVAL FUNCTIONS ------------------------------------------------------
 
@@ -119,7 +137,7 @@ networkCARNIVAL <- function(input.obj, weightCut=0, clusterSize=2) {
 }
 
 
-## 'plotCnet' visualizes the given graph using 'visNet' 
+## 'plotCnet' visualizes the given CARNIVAL graph using 'visNet' 
 #'@param graph.obj, needs to be output of 'networkCARNIVAL' to ensure all parameters are set.
 #'@param layoutType, 1:Fruchtermann-Reingold, 2:GraphOpt, 3:Circle, 4:Sphere, 5:Hierarchy
 #'@param f.title, title of output generated in workdir, can also be full or relative path.
@@ -195,9 +213,104 @@ plotCnet <- function(graph.obj, layoutType=1, f.title="CTF",draw.legend=TRUE, dr
   
 }
 
+## 'progeny2CARNIVAL' transforms dorothea results to suit CARNIVALs input requirements 
+progeny2CARNIVAL <- function(pscores) {
+  ## the data requires some adjustment to work with CARNIVAL, we need vectors with gene names 
+  # and relevant scores
+  # starting with the pathway activity scores in the progeny output
+  PathwayActivity_CARNIVALinput <- pscores %>%
+    as.data.frame() %>%
+    dplyr::rename(score = "t") %>%
+    rownames_to_column(var = "Pathway")
+  
+  # load progeny pathways and associated genes/proteins and respective identifiers
+  load(file = system.file("progenyMembers.RData",package="CARNIVAL"))
+  # we only require the gene names 
+  progenyMembers <- progenyMembers$gene
+  # most pathways have multiple associated genes - we want a vector that contains all the genes and
+  # the score of their respective pathway
+  # So we transform the 'progenyMembers' list into a data.frame where the genes are comma separated
+  # use separate_rows() to split up the commas and insert new rows
+  # use left_join() to insert the calculated scores we loaded earlier
+  tmp <- data.frame(dplyr::left_join(
+    tidyr::separate_rows(
+      data.frame(row.names = NULL,
+                 Pathway= names(progenyMembers), 
+                 genes=sapply(progenyMembers, function(pw) paste(pw,collapse = ",")), 
+                 stringsAsFactors = F), 
+      genes, sep=","), 
+    PathwayActivity_CARNIVALinput, by="Pathway"),stringsAsFactors = F)
+  # Then just extract the scores and add gene name to each element =)
+  progenyScores <- data.frame(t(sort(tmp[,"score"])))
+  #rownames(progenyScores) = "NES"
+  colnames(progenyScores) = tmp$genes
+  
+  return(progenyScores)
+}
+
+## 'dorothea2CARNIVAL' transforms dorothea results to suit CARNIVALs input requirements 
+dorothea2CARNIVAL <- function(dscores) {
+  # Now we will do something similar with the TF-scores we calculated in Dorothea
+  # This is much easier - we just need to select our top 25,50,100,.. genes
+  ## sorting by absolute value
+  TFActivity_CARNIVALinput <- dscores %>%
+    as.data.frame() %>% 
+    rownames_to_column(var = "TF")# %>%
+  #dplyr::filter(P.Value < 1.05)
+  
+  # And select the TopXX scores from the 't' column - also transpose because apparently CARNIVAL has the shittiest code ever..
+  dorotheaScores <- data.frame(t(sort(TFActivity_CARNIVALinput[,"t"])))
+  rownames(dorotheaScores) = "NES"
+  colnames(dorotheaScores) = TFActivity_CARNIVALinput$TF
+  
+  return(dorotheaScores)
+}
+
+## 'enrichCarnival' performs gene set enrichment on a chosen database with CARNIVAL results
+#'@param c.result, CARNIVALs output
+#'@param sourceDB, one of the MSigDbs or own list of gene-sets
+#'@param p.select, one of 'p_value' or 'corr_p_value'
+#'@param p.threshold, cutoff for significance
+enrichCarnival <- function(c.result, sourceDB, p.select = "p_value", p.threshold = 0.05) {
+  nodes <- data.frame(c.result$nodesAttributes,
+                      stringsAsFactors = F) %>% 
+    mutate(act_sign = sign(as.numeric(AvgAct))) 
+  
+  # Are active nodes enriched for a function?
+  # Extract the active nodes and perform gene-set enrichment (GSE) to determine significantly enriched pathways.
+  active_nodes = nodes %>% filter(act_sign == 1)
+  # GSE and Hypergeometric test for the active nodes.
+  gse_active <- GSE_analysis(geneList = active_nodes[[1]],
+                             Annotation_DB = sourceDB)
+  
+  ## Are inactive nodes enriched for a function?
+  # Extract the inactive nodes and perform gene-set enrichment (GSE) to determine significantly enriched pathways.
+  inactive_nodes = nodes %>% filter(act_sign == -1)
+  # GSE and Hypergeometric test for the inactive nodes.
+  gse_inactive <- GSE_analysis(geneList = inactive_nodes[[1]],
+                               Annotation_DB = sourceDB)
+  
+  ## Set variables with type of p-value and threshold for significance.
+  
+  # And have a look, i.e., how many significant gene sets remain with these parameters.
+  gse_active %>% dplyr::filter( get(p.select) < p.threshold ) %>% nrow
+  gse_inactive %>% dplyr::filter( get(p.select) < p.threshold ) %>% nrow
+  
+  ## After we have chosen the correct values we will visualize the most significant pathways.
+  p.active <- plotGSE(gse_active, p.title = "Active nodes ", p.select, p.threshold)
+  p.inactive <- plotGSE(gse_inactive, p.title = "Inactive nodes", p.select, p.threshold)
+  # And write to file
+  
+  ret.list <- list()
+  ret.list[["nodes"]] <- nodes
+  ret.list[["p.active"]] <- p.active
+  ret.list[["p.inactive"]] <- p.inactive
+  return(ret.list)
+}
 
 
 # GSE FUNCTIONS -----------------------------------------------------------
+
 
 # Code for hypergeometric test
 GSE_analysis <- function(geneList,Annotation_DB){
@@ -268,16 +381,6 @@ plotGSE <- function(input.obj, p.title = "", p.select = "corr_p_value", p.thresh
 
 # GSVA FUNCTIONS ----------------------------------------------------------
 
-dat=res.REACTOME
-sourceDB=REACTOME.DB
-setOverlap=0.995
-fieldPvalue="P.Value"
-cutPvalue=0.05 
-clusterSize=2
-p.title="REACTOME.ssGSVA.Thyroid"
-cutString="REACTOME_"
-
-
 ## 'plotGSVAGraph' plot network of significantly enriched pathways
 #'@param dat, output of limma 'topTable' function 
 #'@param soureDB, MSigDb that enrichment was performed on
@@ -287,9 +390,10 @@ cutString="REACTOME_"
 #'@param clusterSize, minimum allowed nodes in clusters
 #'@param cutString, relates to DB-prefix, e.g. "HALLMARK_"
 #'@param p.title, title for output pdf
-plotGSVAGraph <- function(dat, sourceDB, fieldPvalue="P.Value",cutPvalue=0.05, clusterSize=2, p.title="none", cutString, setOverlap=0.5) {
+plotGSVAGraph <- function(dat, sourceDB, fieldPvalue="P.Value",cutPvalue=0.05, clusterSize=2, p.title="none", cutString, setOverlap=0.5, exp.change="logFoldChange") {
   require(igraph, RedeR)
-
+  # for now stay with a single layout option
+  layoutType <- 1
   # We also require a colorramp to visualize PWs regulatory state
   cRamp <- colorRampPalette(c("#1F77B4", "whitesmoke","#D62728"))(10)  
   
@@ -307,12 +411,24 @@ plotGSVAGraph <- function(dat, sourceDB, fieldPvalue="P.Value",cutPvalue=0.05, c
   mat[mat < setOverlap] <- 0
   # Create a graph
   groups.net <- igraph::graph.adjacency(mat, weighted=T,mode="undirected",diag=F)
-   
+  
+  # sig.nodes <- rownames(dat[which(dat[[eval(fieldPvalue)]] <= cutPvalue),])
+  # # retrieve all the first level neighbors of significant nodes
+  # hood <- ego(groups.net, order = 1, sig.nodes)
+  # muh <- unique(unlist(lapply(hood, function(x) append(keeping, as_ids(x)))))
+  # induced.subgraph(groups.net, muh)
+  
+  # tmp.nodes <- as_edgelist(groups.net, names = TRUE)
+  # tmp.nodes <- tmp.nodes[sapply(1:dim(tmp.nodes)[1], function(r.idx) ifelse(tmp.nodes[r.idx,1] %in% sig.nodes | tmp.nodes[r.idx,2] %in% sig.nodes, T,F)),]
+  # keeper <- union(tmp.nodes[,1], union(tmp.nodes[,2], sig.nodes))
+  # test <- igraph::induced_subgraph(groups.net, keeper)
+  # plot(test)
+  
   # Now add information to the nodes
   nodes <- dat[which(dat[[eval(fieldPvalue)]] <= cutPvalue),] %>%
     as.data.frame() %>%
     tibble::rownames_to_column(var = "PWID") %>%
-    dplyr::mutate( node.color = cRamp[cut(logFoldChange,breaks = 10)]) %>%
+    dplyr::mutate( node.color = cRamp[cut(get(exp.change),breaks = 10)]) %>%
     dplyr::mutate( node.shape = ifelse(get(fieldPvalue) <= cutPvalue, "sphere", "square")) %>%
     dplyr::mutate( node.size = sapply( mygroups, length))
   
@@ -341,7 +457,12 @@ plotGSVAGraph <- function(dat, sourceDB, fieldPvalue="P.Value",cutPvalue=0.05, c
   gr <- cluster_edge_betweenness(gt3)
   gr$com.color <- colorRampPalette(c("#AEC7E8", "whitesmoke","#9EDAE5"))(length(gr))[cut(sizes(gr),breaks = length(gr))]
   
-  l <- layout_with_fr(gt3, niter = 2000)
+  l <- switch(layoutType,
+              layout_with_fr(gt3, niter = 2000),
+              layout.fruchterman.reingold(gt3),
+              layout_in_circle(gt3),
+              layout_on_sphere(gt3),
+              layout_randomly(gt3))
   
   pdf(file = paste(p.title,".pdf",sep=""), height = 16, width = 16, useDingbats = F, onefile=TRUE)
   dnet::visNet(gt3, newpage=F,
@@ -370,3 +491,204 @@ plotGSVAGraph <- function(dat, sourceDB, fieldPvalue="P.Value",cutPvalue=0.05, c
 }
 
 
+prepareSTRINGdb <- function() {
+  require(STRINGdb)
+  # create a directory to store data
+  dir.create("data", showWarnings = FALSE)
+  dir.create("data/STRINGdb", showWarnings = FALSE)
+  
+  string_db <- STRINGdb$new( version="11", species=9606,score_threshold=600, 
+                             input_directory=paste(getwd(), "/data/STRINGdb/",sep=""))
+  string.g <- string_db$get_graph()
+  node_ensembl <- igraph::V(string.g)$name
+  # get protein information
+  string_proteins <- string_db$get_proteins()
+  rownames(string_proteins) <- string_proteins$protein_external_id	# adjust df rownames
+  node_symbol <- string_proteins[node_ensembl, 2]		# map to gene name
+  igraph::V(string.g)$node.name <- node_symbol				# replace string_ids with gene-names
+  
+  sDB.list <- list()
+  sDB.list[["string.DB"]] <- string_db
+  sDB.list[["string.g"]] <- string.g
+  assign("stringDB",sDB.list, .GlobalEnv)
+}
+
+
+#'@param sig.PW, vector with selected set of genes, i.e. a regulatory pathway
+#'@param DEA.result, differentially regulated genes
+#'@param pw.name, filename/path for the produced pdf
+#'@param fancy, use STRINGdb plot functionality
+#'@param edge.cut, percentage of edges to cut by weight, i.e. interaction strength
+#'@param exp.change, column name of FoldChange
+#'@param p.select, column name of p-value, default "pvalue"
+#'@param p.cutoff, chosen cutoff for significance, default 0.05
+#'@param pw.regulation, "NO","UP","DOWN" to change colormapping for clustered components
+#'@param layoutType, how to arrange the graph, default is reingold-fruchtmann algorithm
+plotPWGenes <- function(sig.PW, DEA.result=NULL, pw.name="default", fancy=TRUE, 
+                        edge.cut=0.9, exp.change="log2FoldChange",
+                        p.select="pvalue", p.cutoff=0.05, 
+                        pw.regulation="NO", layoutType=1) {
+  
+  # Initialize stringDB if needed
+  if(!exists("stringDB")) {
+    prepareSTRINGdb()
+  }
+  
+  # We require a colorramp to visualize Gene regulatory state
+  cRamp <- colorRampPalette(c("#1F77B4", "whitesmoke","#D62728"))(20)  
+  
+  if(is.null(DEA.result)) {
+    s.genes <- sig.PW %>%
+      as.data.frame() %>%
+      rename("."="Gene") %>%
+      #dplyr::mutate( node.color = cRamp[cut(get(exp.change),breaks = 20)]) %>%
+      dplyr::mutate( node.shape = "circle") %>%
+      dplyr::mutate( node.color = "whitesmoke")
+  } else {
+    # 1. get all the sig. differentially regulated genes for this pathway 
+    s.genes <- DEA.result %>%
+      as.data.frame() %>%
+      tibble::rownames_to_column(var = "Gene") %>%
+      dplyr::mutate( node.shape = ifelse(get(p.select) <= p.cutoff, "sphere", "circle")) %>%
+      dplyr::filter(Gene %in% sig.PW) %>%
+      dplyr::filter(!is.na(node.shape)) %>%
+      dplyr::mutate( node.color = cRamp[cut(get(exp.change),breaks = 20)]) 
+  }
+  
+  s.genes.mapping <- stringDB$string.DB$map(s.genes, "Gene")
+  
+  # STRINGdb version
+  #example1_mapped <- sDB$map( diff_exp_example1, "gene", removeUnmappedRows = TRUE )
+  if( fancy ) {
+    
+    if(is.null(DEA.result)) {
+      pdf(file = paste(pw.name,"_stringDB.pdf",sep=""), height = 16, width = 16, useDingbats = F, onefile=TRUE)
+      stringDB$string.DB$plot_network( s.genes.mapping$STRING_id )
+      dev.off()
+    } else {
+      s.genes.mapping <- stringDB$string.DB$add_diff_exp_color(s.genes.mapping,
+                                                               logFcColStr=eval(exp.change) )
+      # post payload information to the STRING server
+      payload_id <- stringDB$string.DB$post_payload( s.genes.mapping$STRING_id,
+                                                     colors=s.genes.mapping$color )
+      # display a STRING network png with the "halo"
+      pdf(file = paste(pw.name,"_stringDB.pdf",sep=""), height = 16, width = 16, useDingbats = F, onefile=TRUE)
+      stringDB$string.DB$plot_network( s.genes.mapping$STRING_id, payload_id=payload_id )
+      dev.off()
+    }
+    
+  } else {
+    sig.graph <- RedeR::subg(g=stringDB$string.g, 
+                             dat=s.genes.mapping, 
+                             refcol= which(names(s.genes.mapping) %in% "STRING_id"), 
+                             maincomp=FALSE, connected=FALSE)
+    
+    sig.graph <- simplify(sig.graph, edge.attr.comb="sum")
+    
+    ## only keep top 10% of interactions by score
+    edge.idx <- which(get.edge.attribute(sig.graph)$combined_score < quantile(get.edge.attribute(sig.graph)$combined_score, edge.cut))
+    
+    sig.graph <- delete_edges(sig.graph, edge.idx)
+    # add factorized degree, i.e. ranking node by degree
+    deg <- degree(sig.graph, mode="all")
+    V(sig.graph)$node.size <- as.numeric(factor(deg))
+    gr <- cluster_edge_betweenness(sig.graph)
+    # and add a colorramp to the edges as well
+    E(sig.graph)$edge.color <- colorRampPalette(c("#C7C7C7","#7F7F7F"))(10)[cut(E(sig.graph)$combined_score,breaks = 10)]
+    
+    #gr$com.color <- colorRampPalette(c("#AEC7E8", "whitesmoke","#9EDAE5"))(length(gr))[cut(sizes(gr),breaks = length(gr))]
+    if(pw.regulation == "NO") {
+      gr$com.color <- colorRampPalette(c("#c5b723","#8fc523"))(length(gr))[cut(sizes(gr),breaks = length(gr))]
+    } else if(pw.regulation == "UP") {
+      gr$com.color <- colorRampPalette(c("#FF9896","#D62728"))(length(gr))[cut(sizes(gr),breaks = length(gr))]
+    } else {
+      gr$com.color <- colorRampPalette(c("#AEC7E8","#1F77B4"))(length(gr))[cut(sizes(gr),breaks = length(gr))]
+    }
+    
+    l <- switch(layoutType,
+                layout_with_fr(sig.graph, niter = 2000),
+                layout.fruchterman.reingold(sig.graph),
+                layout_in_circle(sig.graph),
+                layout_on_sphere(sig.graph),
+                layout_randomly(sig.graph))
+    
+    pdf(file = paste(pw.name,".pdf",sep=""), height = 16, width = 16, useDingbats = F, onefile=TRUE)
+    dnet::visNet(sig.graph, newpage=F,
+                 vertex.shape=get.vertex.attribute(sig.graph, "node.shape", V(sig.graph)),
+                 vertex.label=get.vertex.attribute(sig.graph, "node.name", V(sig.graph)),
+                 vertex.label.cex=0.55,  vertex.size = scales::rescale(V(sig.graph)$node.size, to=c(2,5)), #log2(V(sig.graph)$node.size+1),
+                 vertex.color = get.vertex.attribute(sig.graph, "node.color", V(sig.graph)),
+                 vertex.frame.color = "black",
+                 vertex.label.family="serif", 
+                 vertex.label.dist = 0.75,
+                 # polygon around connected components
+                 mark.groups=gr, mark.shape=0.5, mark.expand=10, 
+                 mark.alpha=0.1,
+                 mark.border="#C7C7C7", mark.col=gr$com.color,
+                 # edge parameters 
+                 edge.color=E(sig.graph)$edge.color,
+                 #edge.lty = E(carnival.graph)$edge.type,
+                 edge.arrow.size=.2,
+                 edge.curved=.2,
+                 edge.label.cex=0.5,
+                 edge.label.family="serif",
+                 edge.label.color="black",
+                 #edge.label=get.edge.attribute(sig.graph, name = "combined_score"),
+                 edge.width= scales::rescale(get.edge.attribute(sig.graph)$combined_score, to=c(1,4)), center=F,
+                 glayout = l)
+    dev.off()
+    
+  }
+  
+}
+
+## 'plotSigPW' wrapper for plotPWGenes that accepts list of differentially regulated PWs 
+# and plots the corresponding DE genes in a stringDB network
+#'@param PWs, list of DE-PWs, e.g. limma output
+#'@param PW.DB, corresponding MSigDB pathway list
+#'@param DEA.result, DE-genes for this mapping
+#'@param title.prefix, additional plot title info
+#'@param pWFC.idx, index of the column denoting the regulation status of the pws
+#'@param fancy, use STRINGdb plotting or not
+#'@param edge.cut, percentage of edges to cut by weight, i.e. interaction strength
+#'@param exp.change, column name of FoldChange
+#'@param p.select, column name of p-value, default "pvalue"
+#'@param p.cutoff, chosen cutoff for significance, default 0.05
+#'@param pw.regulation, "NO","UP","DOWN" to change colormapping for clustered components
+#'@param layoutType, how to arrange the graph, default is reingold-fruchtmann algorithm
+plotSigPW <- function(PWs, PW.DB, DEA.result, title.prefix="none", pwFC.idx=1, fancy=TRUE, 
+                      edge.cut=0.9, exp.change="log2FoldChange",
+                      p.select="pvalue", p.cutoff=0.05, 
+                      pw.regulation="NO", layoutType=1) {
+  
+  for(pw.idx in 1:dim(PWs)[1]) {
+    pw.name <- rownames(PWs)[pw.idx]
+    PW.genes <- PW.DB[[eval(pw.name)]]
+    
+    pw.regulation <- ifelse(PWs[pw.idx,pwFC.idx] >= 0, "UP","DOWN")
+    
+    print(pw.regulation)
+    
+    pw.name <- paste(title.prefix, pw.name,sep="_")
+    
+    plotPWGenes(PW.genes, 
+                DEA.result,
+                pw.name=pw.name,
+                fancy=fancy, pw.regulation = pw.regulation)
+  }
+}
+
+
+
+## return subgraph with specified threshold for degree
+#'@param graph, the input to work on
+#'@param degree, threshold for degree of connectivity
+#'@return subgraph, constructed ipgraph::induced.subgraph
+getSubDegree <- function( graph, degree ) {
+  deg <- sort(igraph::degree(graph), decreasing=T)
+  idx <- which(deg < degree)
+  idx2 <- which(igraph::V(graph)$name %in% names(idx))
+  gi <- igraph::induced.subgraph(graph, idx2)
+  
+  return(gi)
+}

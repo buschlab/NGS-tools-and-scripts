@@ -21,9 +21,9 @@ onco_gsets <- msigdf::msigdf.human %>%
 # First we load our Expression data set and the results of the differential expression
 # analysis. In this case we are working with output from DESeq2, but this script can
 # be adjusted to work with most DEA frameworks.
-Normalised_counts_matrix <- readRDS(file="data/RDS/airways_normalized_counts.rds", refhook = NULL)
-cova <- readRDS(file="data/RDS/airways_covariates.rds", refhook = NULL)
-result <- readRDS(file="data/RDS/airways_result.rds", refhook = NULL)
+Normalised_counts_matrix <- readRDS(file="data/RDS/Thyroid_normalized_counts.rds", refhook = NULL)
+cova <- readRDS(file="data/RDS/Thyroid_covariates.rds", refhook = NULL)
+result <- readRDS(file="data/RDS/Thyroid_result.rds", refhook = NULL)
 
 # Pathway activities can be computed sample-wise on normalized counts or for the
 # t-statistic of the case/control comparison. To that end we need to calculate t - 
@@ -154,9 +154,9 @@ dev.off()
 # First we load our Expression data set and the results of the differential expression
 # analysis. In this case we are working with output from DESeq2, but this script can
 # be adjusted to work with most DEA frameworks.
-Normalised_counts_matrix <- readRDS(file="data/RDS/airways_normalized_counts.rds", refhook = NULL)
-cova <- readRDS(file="data/RDS/airways_covariates.rds", refhook = NULL)
-result <- readRDS(file="data/RDS/airways_result.rds", refhook = NULL)
+Normalised_counts_matrix <- readRDS(file="data/RDS/Thyroid_normalized_counts.rds", refhook = NULL)
+cova <- readRDS(file="data/RDS/Thyroid_covariates.rds", refhook = NULL)
+result <- readRDS(file="data/RDS/Thyroid_result.rds", refhook = NULL)
 
 # Transcription Factor activities can be computed sample-wise on normalized counts or 
 # for the t-statistic of the case/control comparison. To that end we need to calculate 
@@ -245,11 +245,11 @@ TF.heat <- pheatmap::pheatmap(plot.df, color = viridis::inferno(length(mat_break
                                cluster_rows = T, clustering_distance_rows = "correlation",
                                cluster_cols = F,
                                fontsize_row = 5, fontsize_col = 12,
-                               main = "airways cancer - TF-activity scores",
+                               main = "Thyroid cancer - TF-activity scores",
                                subtitle = 'significant TFs - p <= 0.05')
 
 # save to pdf-file
-pdf(file=paste("data/output/HeatMap.airways.TF.activity.scores_Late_vs_Early.pdf",sep=""), width=6, height=12, onefile=T)
+pdf(file=paste("data/output/HeatMap.Thyroid.TF.activity.scores_Late_vs_Early.pdf",sep=""), width=6, height=12, onefile=T)
 print(TF.heat)
 dev.off()
 
@@ -277,7 +277,7 @@ TF.scores <- ggplot(tf_activities_stat,aes(x = reorder(GeneID, logFC), y = logFC
         panel.grid.minor = element_blank()) +
   xlab("Transcription Factors")
 
-pdf(file=paste("data/output/Barplot.airways.TF.NES.significant_Late_vs_Early.pdf",sep=""), width=6, height=12, onefile=T)
+pdf(file=paste("data/output/Barplot.Thyroid.TF.NES.significant_Late_vs_Early.pdf",sep=""), width=6, height=12, onefile=T)
 print(TF.scores)
 dev.off()
 
@@ -312,7 +312,7 @@ vp_dorothea <- EnhancedVolcano::EnhancedVolcano(plot.df,                   # our
                                                 subtitle = 'MYC target gene expression',
                                                 xlab = "logFC") # how to name the x axis
 
-pdf(file=paste("data/output/Volcano.airways.TF.MYC.target.expression_Late_vs_Early.pdf",sep=""), width=6, height=12, onefile=T)
+pdf(file=paste("data/output/Volcano.Thyroid.TF.MYC.target.expression_Late_vs_Early.pdf",sep=""), width=6, height=12, onefile=T)
 print(vp_dorothea)
 dev.off()
 
@@ -519,7 +519,7 @@ p.nodes <- ggpubr::ggviolin(useful_nodes, x="act_sign", y = "logFC", fill = "act
                             add.params = list(fill = "white"),
                             trim = T,
                             title	= "Dorothea activation status",
-                            subtitle = "airways Late vs Early",
+                            subtitle = "Thyroid Late vs Early",
                             xlab = "Activation direction",
                             ylab = "log2 FoldChange") +
   ggpubr::stat_compare_means() +
@@ -544,7 +544,7 @@ myres_list[["ONCO activated Late vs Early"]] <- gse_active
 myres_list[["ONCO in-activated Late vs Early"]] <- gse_inactive
 
 ## And finally export all the results in an excel table.
-openxlsx::write.xlsx(myres_list,file = paste("data/output/airways.PDC.LATEvsEARLY.xlsx",sep=""),
+openxlsx::write.xlsx(myres_list,file = paste("data/output/Thyroid.PDC.LATEvsEARLY.xlsx",sep=""),
                      rowNames=TRUE,colNames=TRUE, colWidths = c(NA, "auto", "auto"))
 
 
