@@ -75,10 +75,17 @@ tx2gene <- function(){
 #'@param input.obj, unformatted CARNIVAL output
 #'@param weightCut, threshold to dismiss edges with low weight
 #'@param clusterSize, only allow clusters of given size in resulting graph
-networkCARNIVAL <- function(input.obj, weightCut=0, clusterSize=2) {
+networkCARNIVAL <- function(input.obj, weightCut=0, clusterSize=2, GoI=NULL) {
+  # Set-up  color scheme
+  cRamp <- colorRampPalette(c("#1F77B4", "whitesmoke","#D62728"))(11)  
+  GoI.color <- "#FFD700"
   
-  cRamp <- colorRampPalette(c("#1F77B4", "whitesmoke","#D62728"))(10)  
+  # Make sure that genes of interest are actually exisitng in this dataset
+  if( !is.null(GoI) ) {
+    GoI <- intersect(input.obj$nodesAttributes[,1], GoI)
+  }
   
+  # Extract and prepare graph edges
   C.net <- input.obj$weightedSIF %>%
     # transform to data.frame
     as.data.frame() %>%
@@ -95,7 +102,7 @@ networkCARNIVAL <- function(input.obj, weightCut=0, clusterSize=2) {
     #dplyr::mutate( edge.width = as.numeric(cut(Weight, breaks=c(0,25,50,75,100))))
     dplyr::mutate( edge.width = log(Weight, 5))
   
-  
+  # Extract and prepare nodes for plotting
   nodes <- input.obj$nodesAttributes %>% 
     as.data.frame() %>% 
     dplyr::mutate(act_sign = sign(as.numeric(AvgAct))) %>%
@@ -103,10 +110,15 @@ networkCARNIVAL <- function(input.obj, weightCut=0, clusterSize=2) {
     #dplyr::filter(as.numeric(ZeroAct) != 100) %>%
     dplyr::mutate(NodeType = ifelse(nchar(NodeType)==0, "Protein",ifelse(NodeType == "T","TF","Perturbed"))) %>%
     dplyr::mutate( node.title = paste0(Node,"\n","Up activity: ",UpAct,"\n", "Down activity: ",DownAct,sep="")) %>%
-    dplyr::mutate( node.color = cRamp[cut(AvgAct,breaks = 10)]) %>%
-    dplyr::mutate( node.shape = ifelse(NodeType == "TF", "circle", ifelse(NodeType == "Perturbed", "square", "sphere")))
+    dplyr::mutate( node.color = cRamp[cut(AvgAct,breaks = 11)]) %>%
+    dplyr::mutate( node.shape = ifelse(NodeType == "TF", "circle", ifelse(NodeType == "Perturbed", "square", "sphere"))) %>%
+    dplyr::mutate( node.label.color = ifelse(Node %in% GoI, eval(GoI.color), "#000000"))
   
-  ## this is tricky .. so its separate 
+  
+
+  
+  
+  ## Prepare the hierarchical view - this is tricky .. so its separate 
   # find all the nodes that ARE TARGETED by perturbed nodes (S)
   target.by.perturbed <- unique(C.net$Node2[which(C.net$Node1 %in% unique(nodes$Node[which(nodes$NodeType=="Perturbed")]))])
   # find all the nodes that TARGET TFs (T)
@@ -124,15 +136,35 @@ networkCARNIVAL <- function(input.obj, weightCut=0, clusterSize=2) {
   C.net <- C.net %>%
     igraph::graph_from_data_frame(directed = TRUE, vertices = nodes)  
   
-  
+  # add node degree at graph construction as size attribute (factor) to nodes
   deg <- degree(C.net, mode="all")
   V(C.net)$size <- as.numeric(factor(deg))
   
-  # get component statistics and create subgraph that only contains connected nodes
-  tmp <- igraph::components(C.net)
-  tmp_clusters <- which(tmp$csize >= clusterSize)
-  C.net <- igraph::induced_subgraph(C.net, names(tmp$membership[which(tmp$membership %in% tmp_clusters)]))
+  # determine longest path as cutoff for neighborhood calculation
+  longest.path <- diameter(C.net, directed = TRUE, unconnected = TRUE, weights = NULL)
   
+  if( clusterSize == 0 & !is.null(GoI) ) {
+    ## Take the GoI and their neighbors only.
+    GoI.friends <- unique(names(unlist(ego(C.net, order = longest.path, GoI))))
+    # construct subnet with selected nodes
+    C.net <- igraph::induced_subgraph(C.net, GoI.friends)
+    
+  } else if( (clusterSize == 0 & is.null(GoI)) | (clusterSize == 1) ) {
+    ## Keep all the nodes - nothing to do here atm
+  } else {
+    ## Original behavior, but if GoI given them and their neighbors will not be removed
+    # compute clustered components
+    tmp <- igraph::components(C.net)
+    # extract names of nodes in appropriate clusters
+    cluster.nodes <- names(tmp$membership[which(tmp$membership %in% which(tmp$csize >= clusterSize))])
+    # If there is a GoI vector, calculate neighborhood and add names to our cluster list, irrespective of degree
+    if( !is.null(GoI) ) {
+      GoI.friends <- unique(names(unlist(ego(C.net, order = longest.path, GoI))))
+      cluster.nodes <- unique(c(cluster.nodes, GoI.friends))
+    }
+    # create new sub-graph
+    C.net <- igraph::induced_subgraph(C.net, cluster.nodes)
+  }
   return(C.net)
 }
 
@@ -172,7 +204,7 @@ plotCnet <- function(graph.obj, layoutType=1, f.title="CTF",draw.legend=TRUE, dr
               vertex.shape=V(graph.obj)$node.shape, 
               vertex.size = scales::rescale(V(graph.obj)$size, to = c(2,7)),
               vertex.color = V(graph.obj)$node.color, vertex.frame.color = "black",
-              vertex.label.cex=0.75, vertex.label.dist = 0.5, vertex.label.color = "black",
+              vertex.label.cex=0.75, vertex.label.dist = 0.5, vertex.label.color = V(graph.obj)$node.label.color,
               vertex.label.family = "Times", vertex.label.font = 1,
               #vertex.label = V(graph.obj)$node.level,
               # edge parameters

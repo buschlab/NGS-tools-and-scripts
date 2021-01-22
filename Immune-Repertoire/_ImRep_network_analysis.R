@@ -571,14 +571,30 @@ getGraphMetrics <- function(input.obj, cnt.Col="cloneCount", frac.Col="cloneFrac
 # components and adjusts node size according to degree (log2 transformed)
 #'@param igraph.obj, CT igraph object containing vertex parameters 'node.shape', 'sID', 'node.color' and edge attribute 'weight'
 #'@param layoutType, switch 1:5 layout types for the graph
+#'@param conComp, TRUE calculate and color connected components, else color clusters
 #'@param edge.label, name of the attribute to label edges with, default is empty ("")
-plotCTNet <- function(igraph.obj, layoutType=1, edge.label="") {
+plotCTNet <- function(igraph.obj, layoutType=1, conComp=TRUE, edge.label="") {
   #layoutType <- 1
+  cc.col=c("#AEC7E8", "whitesmoke","#9EDAE5")
   
   deg <- degree(igraph.obj, mode="all")
   V(igraph.obj)$node.size <- as.numeric(factor(deg))
-  gr <- cluster_edge_betweenness(igraph.obj)
-  gr$com.color <- colorRampPalette(c("#AEC7E8", "whitesmoke","#9EDAE5"))(length(gr))[cut(sizes(gr),breaks = length(gr))]
+  
+  if(conComp) {
+    gr <- cluster_edge_betweenness(igraph.obj, weights=E(igraph.obj)$weight, edge.betweenness = FALSE)
+    com.color <- colorRampPalette(cc.col)(length(gr))[cut(sizes(gr),breaks = length(gr))]
+  } else {
+    # color clusters only
+    tmp <- igraph::components(igraph.obj)
+    
+    gr <- list()
+    for(nodeIDX in 1:length(tmp$membership)) {
+      gr[[as.character(tmp$membership[nodeIDX])]] <- c(gr[[as.character(tmp$membership[nodeIDX])]],names(tmp$membership[nodeIDX]))
+    }
+    # and paint the clusters
+    com.color <- colorRampPalette(cc.col)(length(gr))[cut(lengths(gr),breaks = length(gr))]
+    
+  }
   
   l <- switch(layoutType,
               layout_with_fr(igraph.obj, niter = 2000),
@@ -597,7 +613,7 @@ plotCTNet <- function(igraph.obj, layoutType=1, edge.label="") {
                vertex.label.dist = 0.5,
                # polygon around connected components
                mark.groups=gr, mark.shape=0.5, mark.expand=10, 
-               mark.border="#C7C7C7", mark.col=gr$com.color,
+               mark.border="#C7C7C7", mark.col=com.color,
                # edge parameters 
                edge.color="#7F7F7F",
                #edge.lty = E(carnival.graph)$edge.type,
@@ -611,7 +627,6 @@ plotCTNet <- function(igraph.obj, layoutType=1, edge.label="") {
                center=F,glayout = l)
   
 }
-
 
 
 # EXPERIMENTAL ------------------------------------------------------------
